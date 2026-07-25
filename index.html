@@ -20,10 +20,40 @@
   details > summary { cursor: pointer; list-style: none; }
   details > summary::-webkit-details-marker { display: none; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* --- responsive layout (classes so media queries can override; inline styles cannot be) --- */
+  .page { min-height:100vh; padding:28px 32px 56px; box-sizing:border-box; }
+  .controls { display:grid; grid-template-columns:minmax(240px,1fr) minmax(240px,1fr) minmax(280px,1.2fr); gap:16px; align-items:stretch; }
+  .cal-head { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; margin-bottom:8px; }
+  .cal-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); grid-auto-rows:minmax(172px,auto); gap:8px; }
+  .cell { min-height:172px; }
+  .week-cards { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-top:10px; }
+  .dow-inline { display:none; }
+
+  /* tablet: controls collapse to two columns, the "hay que regar" card spans the full width */
+  @media (max-width: 900px) {
+    .controls { grid-template-columns:1fr 1fr; }
+    .controls > :nth-child(3) { grid-column:1 / -1; }
+  }
+  /* phone/portrait: the calendar reflows from a 7-column grid into a vertical list of day rows */
+  @media (max-width: 768px) {
+    .cal-head { display:none; }
+    .pad { display:none; }
+    .cal-grid { grid-template-columns:1fr; grid-auto-rows:auto; }
+    .cell { min-height:128px; }
+    .dow-inline { display:inline; }
+    .week-cards { grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); }
+    .wpad { display:none; }
+  }
+  /* small phone: everything stacks, tighter page padding */
+  @media (max-width: 560px) {
+    .page { padding:16px 14px 40px; }
+    .controls { grid-template-columns:1fr; }
+  }
 </style>
 </head>
 <body>
-<div style="min-height:100vh; padding:28px 32px 56px; box-sizing:border-box;">
+<div class="page">
   <div id="app" style="max-width:1320px; margin:0 auto; display:flex; flex-direction:column; gap:20px;"></div>
 </div>
 
@@ -105,7 +135,7 @@ function wateredMarkup(d) {
 // ---- month cell ---------------------------------------------------------
 function monthCell(d) {
   const h = d.has ? heat(d.temp) : null;
-  const base = "min-height:172px;height:100%;border-radius:10px;padding:11px 12px 10px;box-sizing:border-box;display:grid;grid-template-rows:23px 76px 1fr;";
+  const base = "height:100%;border-radius:10px;padding:11px 12px 10px;box-sizing:border-box;display:grid;grid-template-rows:23px 76px 1fr;";
   // Flat, uncolored chrome by default. Flags are conveyed by the chips.
   const CELL_BG = "oklch(0.985 0.008 82)";
   const NEUTRAL_BORDER = "oklch(0.9 0.015 78)";
@@ -137,10 +167,13 @@ function monthCell(d) {
   const rainColor = !d.has ? "oklch(0.8 0.015 75)" : (d.rain > 0 ? "oklch(0.45 0.1 235)" : "oklch(0.5 0.04 50)");
   const rainText = d.has && d.rain !== null ? `${n1(d.rain)} mm de lluvia` : "sin datos de lluvia";
 
-  return `<div style="${cellStyle}">
+  return `<div class="cell" style="${cellStyle}">
     <div style="display:flex;align-items:center;gap:6px;height:16px;">${wateredMarkup(d)}</div>
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;">
-      <div style="font-family:${MONO};font-size:17px;font-weight:600;line-height:1;align-self:flex-start;padding:3px 7px;border-radius:5px;background:${dateBg};color:${dateColor};">${d.n}</div>
+      <div style="display:flex;align-items:center;gap:7px;">
+        <div style="font-family:${MONO};font-size:17px;font-weight:600;line-height:1;padding:3px 7px;border-radius:5px;background:${dateBg};color:${dateColor};">${d.n}</div>
+        <span class="dow-inline" style="font-family:${MONO};font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:oklch(0.55 0.04 60);">${d.dow}</span>
+      </div>
       <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-end;min-height:60px;">${chips}</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:2px;align-self:end;width:100%;">
@@ -162,12 +195,12 @@ function monthView(days) {
   const lead = DOW.indexOf(days[0].dow);
   let pads = "";
   for (let i = 0; i < lead; i++) {
-    pads += `<div style="border-radius:10px;background:oklch(0.972 0.006 80);"></div>`;
+    pads += `<div class="pad" style="border-radius:10px;background:oklch(0.972 0.006 80);"></div>`;
   }
   const cells = days.map(monthCell).join("");
   return `<div style="background:oklch(1 0 0);border:1px solid oklch(0.9 0.02 75);border-radius:14px;padding:18px;">
-    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin-bottom:8px;">${heads}</div>
-    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-auto-rows:minmax(172px,auto);gap:8px;">${pads}${cells}</div>
+    <div class="cal-head">${heads}</div>
+    <div class="cal-grid">${pads}${cells}</div>
   </div>`;
 }
 
@@ -236,7 +269,7 @@ function weekView(days) {
     }).join("");
 
     const feet = slots.map(d => {
-      if (!d) return `<div style="visibility:hidden;"></div>`;
+      if (!d) return `<div class="wpad" style="visibility:hidden;"></div>`;
       const footStyle = d.both ? "background:oklch(0.62 0.19 36 / 0.14);border:1px solid oklch(0.5 0.19 34);"
         : d.has ? "background:oklch(0.975 0.012 82);border:1px solid oklch(0.93 0.018 78);"
         : "background:oklch(0.965 0.005 80);border:1px dashed oklch(0.9 0.008 80);";
@@ -280,7 +313,7 @@ function weekView(days) {
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;">${polylines}</svg>
         <div style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(7,1fr);">${cols}</div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:10px;">${feet}</div>
+      <div class="week-cards">${feet}</div>
     </div>`;
   }).join("");
 }
@@ -312,12 +345,12 @@ function reference() {
     </summary>
     <div style="padding:4px 16px 16px;display:flex;flex-direction:column;gap:14px;font-size:12.5px;color:oklch(0.4 0.03 55);line-height:1.5;">
       <div>Un huerto estándar necesita en torno a <strong>25 mm de agua por semana</strong> en condiciones normales. El calor y la evaporación suben esa cifra.</div>
-      <table style="border-collapse:collapse;width:100%;font-size:12px;">
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;"><table style="border-collapse:collapse;width:100%;min-width:440px;font-size:12px;">
         <tr><th style="${head}">Temperatura</th><th style="${head}">Agua semanal</th><th style="${head}">Equivalente diario</th><th style="${head}">Riego manual (sin lluvia)</th></tr>
         <tr><td style="${cell}">Fresco (&lt; 20 °C)</td><td style="${cell}">20–25 mm</td><td style="${cell}">~3 mm/día</td><td style="${cell}">cada 3–4 días</td></tr>
         <tr><td style="${cell}">Moderado (20–28 °C)</td><td style="${cell}">25–35 mm</td><td style="${cell}">~4–5 mm/día</td><td style="${cell}">cada 2–3 días</td></tr>
         <tr><td style="${cell}">Caluroso (&gt; 30 °C)</td><td style="${cell}">40–50 mm</td><td style="${cell}">~6–7 mm/día</td><td style="${cell}">a diario</td></tr>
-      </table>
+      </table></div>
       <div style="display:flex;flex-direction:column;gap:4px;">
         <div><strong>Lluvia diaria:</strong> por debajo de 3 mm es llovizna que se evapora antes de calar, ignórala. El umbral de lluvia por defecto está en 3 mm por eso.</div>
         <div>Entre 3 y 10 mm retrasa el riego un día. De 10 mm en adelante es un riego profundo que cubre entre 2 y 4 días.</div>
@@ -369,7 +402,7 @@ function render() {
   const recorded = days.filter(d => d.has).length;
   const noData = DAYS_IN_MONTH - recorded;
 
-  const controls = `<div style="display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,1fr) minmax(300px,1.3fr);gap:16px;align-items:stretch;">
+  const controls = `<div class="controls">
     <div style="background:oklch(1 0 0);border:1px solid oklch(0.9 0.02 75);border-radius:12px;padding:16px 18px 14px;display:flex;flex-direction:column;gap:10px;">
       <div style="display:flex;align-items:baseline;justify-content:space-between;">
         <div style="font-size:13px;font-weight:600;letter-spacing:0.02em;color:oklch(0.45 0.04 55);flex:1;">Temperatura alta igual o superior a</div>
