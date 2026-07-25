@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Huerta · Agosto 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: oklch(0.975 0.014 82);
+    color: oklch(0.26 0.03 55);
+    font-family: Archivo, Helvetica, sans-serif;
+  }
+  a { color: oklch(0.52 0.15 38); }
+  input[type="range"] { accent-color: oklch(0.58 0.17 38); width: 100%; margin: 0; }
+  button { font-family: inherit; }
+  details > summary { cursor: pointer; list-style: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div style="min-height:100vh; padding:28px 32px 56px; box-sizing:border-box;">
+  <div id="app" style="max-width:1320px; margin:0 auto; display:flex; flex-direction:column; gap:20px;"></div>
+</div>
+
+<script>
+"use strict";
+
+// ---- config -------------------------------------------------------------
+const YEAR = 2026, MONTH = 8, DAYS_IN_MONTH = 31;
+const DATA_URL = "./history.json";
+
+const MONO = "'IBM Plex Mono', monospace";
+const DOW = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+// Aug 1 2026 is a Saturday. weekday index (Monday-start) for day n = (n + 4) % 7.
+const dowOf = n => DOW[(n + 4) % 7];
+
+// ---- small helpers ------------------------------------------------------
+const n1 = v => v.toFixed(1).replace(".", ",");        // comma decimals, es-ES
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+
+// warm ramp: 24C sandy yellow -> 40C deep terracotta
+function heat(t) {
+  const k = clamp((t - 24) / 14, 0, 1);
+  return {
+    fill: `oklch(${lerp(0.955, 0.66, k).toFixed(3)} ${lerp(0.035, 0.175, k).toFixed(3)} ${lerp(95, 34, k).toFixed(1)})`,
+    solid: `oklch(${lerp(0.72, 0.5, k).toFixed(3)} ${lerp(0.11, 0.19, k).toFixed(3)} ${lerp(80, 32, k).toFixed(1)})`,
+    text: `oklch(${lerp(0.56, 0.38, k).toFixed(3)} ${lerp(0.1, 0.16, k).toFixed(3)} ${lerp(72, 32, k).toFixed(1)})`,
+    k
+  };
+}
+
+// ---- state --------------------------------------------------------------
+const state = {
+  data: null,
+  error: "",
+  tempT: 30,   // "hot" per your notes: above ~30C evapotranspiration spikes
+  rainT: 3,    // under 3mm is drizzle that never reaches the roots -> ignore
+  view: "month"
+};
+
+// ---- derive per-day model ----------------------------------------------
+function buildDays() {
+  const data = state.data || {};
+  const out = [];
+  for (let n = 1; n <= DAYS_IN_MONTH; n++) {
+    const key = `${YEAR}-${String(MONTH).padStart(2, "0")}-${String(n).padStart(2, "0")}`;
+    const e = data[key];
+    const temp = e && typeof e.high_c === "number" ? e.high_c : null;
+    const rain = e && typeof e.rain_mm === "number" ? e.rain_mm : null;
+    const has = temp !== null;
+    const hot = has && temp >= state.tempT;
+    const dry = has && rain !== null && rain < state.rainT;
+    out.push({
+      n, key, temp, rain, has, hot, dry,
+      both: hot && dry,
+      watered: e ? (e.watered === true ? true : e.watered === false ? false : null) : null,
+      dow: dowOf(n)
+    });
+  }
+  return out;
+}
+
+// ---- watered marker (three states) -------------------------------------
+function wateredMarkup(d) {
+  if (d.watered === true) {
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:oklch(0.55 0.12 235);flex:none;">
+      <svg viewBox="0 0 12 12" style="width:12px;height:12px;display:block;"><polyline points="2.5,6.4 4.8,8.7 9.5,3.6" fill="none" stroke="oklch(1 0 0)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </span><span style="font-family:${MONO};font-size:10.5px;font-weight:500;letter-spacing:0.04em;color:oklch(0.45 0.1 235);">regado</span>`;
+  }
+  if (d.watered === false) {
+    return `<span style="width:13px;height:13px;border-radius:50%;background:oklch(1 0 0);border:2px solid oklch(0.55 0.05 60);box-sizing:border-box;flex:none;"></span>
+      <span style="font-family:${MONO};font-size:10.5px;letter-spacing:0.04em;color:oklch(0.5 0.04 58);">sin regar</span>`;
+  }
+  // null: not recorded (whether or not the day has weather)
+  return `<span style="width:13px;height:13px;border-radius:50%;border:2px dotted oklch(0.72 0.025 70);box-sizing:border-box;flex:none;"></span>
+    <span style="font-family:${MONO};font-size:10.5px;letter-spacing:0.04em;color:oklch(0.66 0.025 68);">sin registrar</span>`;
+}
+
+// ---- month cell ---------------------------------------------------------
+function monthCell(d) {
+  const h = d.has ? heat(d.temp) : null;
+  const base = "min-height:172px;height:100%;border-radius:10px;padding:11px 12px 10px;box-sizing:border-box;display:grid;grid-template-rows:23px 76px 1fr;";
+  // Flat, uncolored chrome by default. Flags are conveyed by the chips.
+  const CELL_BG = "oklch(0.985 0.008 82)";
+  const NEUTRAL_BORDER = "oklch(0.9 0.015 78)";
+  const WATER_ALERT = "oklch(0.5 0.19 34)"; // same terracotta as the "hay que regar" chip
+  // A "hay que regar" day (hot + dry) that was not watered gets an outline in the alert colour.
+  const alertUnwatered = d.both && d.watered !== true;
+  const borderColor = alertUnwatered ? WATER_ALERT : NEUTRAL_BORDER;
+  const borderWidth = alertUnwatered ? "2px" : "1px";
+  const cellStyle = d.has
+    ? base + `background:${CELL_BG};border:${borderWidth} solid ${borderColor};`
+    : base + `background:repeating-linear-gradient(135deg, oklch(0.955 0.006 80) 0 5px, oklch(0.935 0.006 80) 5px 10px);border:${borderWidth} solid ${borderColor};`;
+
+  const chipBase = `font-family:${MONO};font-size:9.5px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;padding:3px 5px;border-radius:4px;text-align:right;line-height:1.25;`;
+  const hotChip = `<div style="${chipBase}background:oklch(0.62 0.18 42);color:oklch(0.99 0.01 80);">calor</div>`;
+  const dryChip = `<div style="${chipBase}background:oklch(0.94 0.03 235);color:oklch(0.42 0.1 240);border:1px solid oklch(0.7 0.08 235);">sin lluvia</div>`;
+  let chips = "";
+  if (d.both) {
+    chips = `<div style="${chipBase}background:oklch(0.5 0.19 34);color:oklch(0.99 0.01 80);box-shadow:0 1px 0 oklch(0.4 0.15 34);">hay que regar</div>` + hotChip + dryChip;
+  } else {
+    if (d.hot) chips += hotChip;
+    if (d.dry) chips += dryChip;
+  }
+
+  const dark = d.has && h.k > 0.62;
+  const dateBg = d.has ? "oklch(1 0 0 / 0.72)" : "oklch(1 0 0 / 0.5)";
+  const dateColor = d.has ? "oklch(0.34 0.015 60)" : "oklch(0.74 0.012 75)";
+  const tempColor = d.has ? h.text : "oklch(0.8 0.015 75)";
+  const unitColor = d.has ? "oklch(0.48 0.05 45)" : "oklch(0.8 0.015 75)";
+  const rainColor = !d.has ? "oklch(0.8 0.015 75)" : (d.rain > 0 ? "oklch(0.45 0.1 235)" : "oklch(0.5 0.04 50)");
+  const rainText = d.has && d.rain !== null ? `${n1(d.rain)} mm de lluvia` : "sin datos de lluvia";
+
+  return `<div style="${cellStyle}">
+    <div style="display:flex;align-items:center;gap:6px;height:16px;">${wateredMarkup(d)}</div>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;">
+      <div style="font-family:${MONO};font-size:17px;font-weight:600;line-height:1;align-self:flex-start;padding:3px 7px;border-radius:5px;background:${dateBg};color:${dateColor};">${d.n}</div>
+      <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-end;min-height:60px;">${chips}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px;align-self:end;width:100%;">
+      <div style="display:flex;align-items:baseline;gap:4px;">
+        <span style="font-family:${MONO};font-size:${d.has ? 26 : 22}px;font-weight:600;line-height:1;letter-spacing:-0.02em;color:${tempColor};">${d.has ? n1(d.temp) : "—"}</span>
+        <span style="font-family:${MONO};font-size:12px;color:${unitColor};">${d.has ? "°C" : ""}</span>
+      </div>
+      <div style="font-family:${MONO};font-size:11.5px;letter-spacing:0.02em;color:${rainColor};">${rainText}</div>
+    </div>
+  </div>`;
+}
+
+// ---- month view ---------------------------------------------------------
+function monthView(days) {
+  const heads = DOW.map(w =>
+    `<div style="font-family:${MONO};font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.6 0.03 60);padding-left:2px;">${w}</div>`
+  ).join("");
+  // Aug 1 is Saturday -> 5 leading blanks in a Monday-start grid
+  const lead = DOW.indexOf(days[0].dow);
+  let pads = "";
+  for (let i = 0; i < lead; i++) {
+    pads += `<div style="border-radius:10px;background:oklch(0.972 0.006 80);"></div>`;
+  }
+  const cells = days.map(monthCell).join("");
+  return `<div style="background:oklch(1 0 0);border:1px solid oklch(0.9 0.02 75);border-radius:14px;padding:18px;">
+    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin-bottom:8px;">${heads}</div>
+    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-auto-rows:minmax(172px,auto);gap:8px;">${pads}${cells}</div>
+  </div>`;
+}
+
+// ---- week view ----------------------------------------------------------
+function buildWeeks(days) {
+  const weeks = [];
+  let cur = [];
+  for (const d of days) {
+    if (d.dow === "Lun" && cur.length) { weeks.push(cur); cur = []; }
+    cur.push(d);
+  }
+  if (cur.length) weeks.push(cur);
+  return weeks;
+}
+
+function weekView(days) {
+  const weeks = buildWeeks(days);
+  const T_MIN = 22, T_MAX = 40, R_MAX = 24;
+  const yTemp = t => 26 + (1 - (clamp(t, T_MIN, T_MAX) - T_MIN) / (T_MAX - T_MIN)) * 42;
+  const hRain = r => Math.min(1, r / R_MAX) * 32;
+
+  return weeks.map(wd => {
+    const lead = DOW.indexOf(wd[0].dow);
+    const slots = [];
+    for (let i = 0; i < lead; i++) slots.push(null);
+    wd.forEach(d => slots.push(d));
+    while (slots.length < 7) slots.push(null);
+
+    // temperature line, broken across missing days
+    const segments = [];
+    let run = [];
+    slots.forEach((d, i) => {
+      if (d && d.has) run.push(`${((i + 0.5) / 7 * 100).toFixed(2)},${yTemp(d.temp).toFixed(2)}`);
+      else { if (run.length > 1) segments.push(run.join(" ")); run = []; }
+    });
+    if (run.length > 1) segments.push(run.join(" "));
+    const polylines = segments.map(pts =>
+      `<polyline points="${pts}" fill="none" stroke="oklch(0.55 0.18 38)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`
+    ).join("");
+
+    const cols = slots.map(d => {
+      if (!d) {
+        return `<div style="position:relative;height:100%;background:repeating-linear-gradient(135deg, oklch(0.96 0.005 80) 0 5px, oklch(0.945 0.005 80) 5px 10px);border-right:1px solid oklch(0.94 0.012 78);"></div>`;
+      }
+      const colBg = d.both ? "background:oklch(0.6 0.19 36 / 0.1);"
+        : d.has ? ""
+        : "background:repeating-linear-gradient(135deg, oklch(0.955 0.005 80) 0 5px, oklch(0.94 0.005 80) 5px 10px);";
+      const hotMark = `<span style="width:9px;height:9px;border-radius:50%;background:oklch(0.62 0.18 42);"></span>`;
+      const dryMark = `<span style="width:9px;height:9px;border-radius:50%;background:oklch(1 0 0);border:2px solid oklch(0.6 0.09 235);box-sizing:border-box;"></span>`;
+      let markers = "";
+      if (d.both) markers = `<span style="width:11px;height:11px;border-radius:2px;background:oklch(0.5 0.19 34);box-shadow:0 0 0 2px oklch(1 0 0);"></span>` + hotMark + dryMark;
+      else { if (d.hot) markers += hotMark; if (d.dry) markers += dryMark; }
+
+      const h = d.has ? heat(d.temp) : null;
+      const rainBar = d.has && d.rain !== null && d.rain > 0
+        ? `<div style="position:absolute;bottom:0;left:28%;right:28%;height:${hRain(d.rain).toFixed(2)}%;background:oklch(0.62 0.1 232);border-radius:3px 3px 0 0;"></div>`
+        : "";
+      const tempDot = d.has
+        ? `<div style="position:absolute;top:${yTemp(d.temp).toFixed(2)}%;left:50%;transform:translate(-50%,-50%);width:11px;height:11px;border-radius:50%;background:${h.solid};box-shadow:0 0 0 2.5px oklch(1 0 0);"></div>
+           <div style="position:absolute;top:${yTemp(d.temp).toFixed(2)}%;left:50%;transform:translate(-50%,-160%);font-family:${MONO};font-size:11px;font-weight:600;color:oklch(0.36 0.09 40);white-space:nowrap;">${n1(d.temp)}°</div>`
+        : `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-family:${MONO};font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:oklch(0.78 0.015 72);">sin datos</div>`;
+      const markerRow = markers
+        ? `<div style="position:absolute;top:6px;left:0;right:0;display:flex;justify-content:center;gap:4px;">${markers}</div>`
+        : "";
+      return `<div style="position:relative;height:100%;${colBg}border-right:1px solid oklch(0.94 0.012 78);">${markerRow}${rainBar}${tempDot}</div>`;
+    }).join("");
+
+    const feet = slots.map(d => {
+      if (!d) return `<div style="visibility:hidden;"></div>`;
+      const footStyle = d.both ? "background:oklch(0.62 0.19 36 / 0.14);border:1px solid oklch(0.5 0.19 34);"
+        : d.has ? "background:oklch(0.975 0.012 82);border:1px solid oklch(0.93 0.018 78);"
+        : "background:oklch(0.965 0.005 80);border:1px dashed oklch(0.9 0.008 80);";
+      const has = d.has;
+      const dowColor = has ? "oklch(0.58 0.04 58)" : "oklch(0.78 0.015 72)";
+      const dateColor = has ? "oklch(0.3 0.04 50)" : "oklch(0.78 0.015 72)";
+      const tColor = has ? "oklch(0.42 0.14 38)" : "oklch(0.8 0.015 72)";
+      const rColor = has && d.rain > 0 ? "oklch(0.48 0.1 233)" : "oklch(0.66 0.02 68)";
+      const rText = has && d.rain !== null ? `${n1(d.rain)}mm` : "";
+      return `<div style="display:flex;flex-direction:column;gap:5px;padding:8px 9px;border-radius:8px;box-sizing:border-box;${footStyle}">
+        <div style="display:flex;align-items:baseline;gap:6px;">
+          <span style="font-family:${MONO};font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:${dowColor};">${d.dow}</span>
+          <span style="font-family:${MONO};font-size:15px;font-weight:600;color:${dateColor};">${d.n} ago</span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:5px;font-family:${MONO};">
+          <span style="font-size:13px;font-weight:600;color:${tColor};">${has ? n1(d.temp) + "°C" : "—"}</span>
+          <span style="font-size:12px;color:${rColor};">${rText}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">${wateredMarkup(d)}</div>
+      </div>`;
+    }).join("");
+
+    const recorded = wd.filter(d => d.has).length;
+    const flagged = wd.filter(d => d.both).length;
+    const first = wd[0], last = wd[wd.length - 1];
+    const label = wd.length === 1 ? `${first.n} de agosto` : `${first.n} – ${last.n} de agosto`;
+    const summary = recorded === 0 ? "sin datos aún" : `${recorded} registrados · ${flagged} con riego`;
+
+    return `<div style="background:oklch(1 0 0);border:1px solid oklch(0.9 0.02 75);border-radius:14px;padding:16px 18px 14px;">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:10px;">
+        <div style="font-size:15px;font-weight:700;letter-spacing:-0.01em;">${label}</div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div style="font-family:${MONO};font-size:9.5px;letter-spacing:0.08em;text-transform:uppercase;padding:2px 6px;border-radius:3px;background:oklch(0.96 0.05 60);color:oklch(0.44 0.14 40);">umbral temp ${n1(state.tempT)}°C</div>
+          <div style="font-family:${MONO};font-size:9.5px;letter-spacing:0.08em;text-transform:uppercase;padding:2px 6px;border-radius:3px;background:oklch(0.95 0.03 235);color:oklch(0.42 0.1 238);">umbral lluvia ${n1(state.rainT)} mm</div>
+          <div style="font-family:${MONO};font-size:11.5px;letter-spacing:0.06em;text-transform:uppercase;color:oklch(0.58 0.04 58);">${summary}</div>
+        </div>
+      </div>
+      <div style="position:relative;height:190px;border-radius:8px;background:linear-gradient(oklch(0.99 0.012 84), oklch(0.965 0.016 80));border:1px solid oklch(0.93 0.018 78);overflow:hidden;">
+        <div style="position:absolute;left:0;right:0;top:${yTemp(state.tempT).toFixed(2)}%;border-top:1.5px dashed oklch(0.68 0.14 42);"></div>
+        <div style="position:absolute;left:0;right:0;bottom:${hRain(state.rainT).toFixed(2)}%;border-top:1.5px dashed oklch(0.68 0.09 232);"></div>
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;">${polylines}</svg>
+        <div style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(7,1fr);">${cols}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:10px;">${feet}</div>
+    </div>`;
+  }).join("");
+}
+
+// ---- legend -------------------------------------------------------------
+function legend() {
+  const item = (mark, label) => `<div style="display:flex;align-items:center;gap:7px;">${mark}<span>${label}</span></div>`;
+  const chip = (bg, color, border, text) =>
+    `<span style="font-family:${MONO};font-size:9.5px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;padding:3px 5px;border-radius:4px;line-height:1.25;background:${bg};color:${color};${border}">${text}</span>`;
+  return `<div style="display:flex;flex-wrap:wrap;gap:8px 22px;align-items:center;padding:12px 16px;background:oklch(0.955 0.018 80);border:1px dashed oklch(0.87 0.025 75);border-radius:10px;font-size:12.5px;color:oklch(0.4 0.03 55);">
+    ${item(chip("oklch(0.62 0.18 42)", "oklch(0.99 0.01 80)", "", "calor"), "temperatura alta")}
+    ${item(chip("oklch(0.94 0.03 235)", "oklch(0.42 0.1 240)", "border:1px solid oklch(0.7 0.08 235);", "sin lluvia"), "lluvia por debajo del umbral")}
+    ${item(chip("oklch(0.5 0.19 34)", "oklch(0.99 0.01 80)", "box-shadow:0 1px 0 oklch(0.4 0.15 34);", "hay que regar"), "los dos avisos se acumulan")}
+    ${item(`<span style="width:24px;height:16px;border-radius:4px;background:repeating-linear-gradient(135deg, oklch(0.955 0.006 80) 0 5px, oklch(0.935 0.006 80) 5px 10px);border:1px solid oklch(0.91 0.008 80);"></span>`, "sin datos aún")}
+    <div style="width:1px;height:18px;background:oklch(0.87 0.025 75);"></div>
+    ${item(`<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:oklch(0.55 0.12 235);flex:none;"><svg viewBox="0 0 12 12" style="width:12px;height:12px;display:block;"><polyline points="2.5,6.4 4.8,8.7 9.5,3.6" fill="none" stroke="oklch(1 0 0)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`, "regado")}
+    ${item(`<span style="width:13px;height:13px;border-radius:50%;background:oklch(1 0 0);border:2px solid oklch(0.55 0.05 60);"></span>`, "decidí no regar")}
+    ${item(`<span style="width:13px;height:13px;border-radius:50%;background:transparent;border:2px dotted oklch(0.75 0.02 70);"></span>`, "sin registrar")}
+  </div>`;
+}
+
+// ---- reference (your agronomy notes) -----------------------------------
+function reference() {
+  const cell = "padding:5px 10px;border-bottom:1px solid oklch(0.92 0.015 78);";
+  const head = "padding:5px 10px;font-family:" + MONO + ";font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:oklch(0.55 0.04 58);text-align:left;border-bottom:1px solid oklch(0.88 0.02 75);";
+  return `<details style="background:oklch(1 0 0);border:1px solid oklch(0.9 0.02 75);border-radius:12px;padding:0;">
+    <summary style="padding:12px 16px;font-size:13px;font-weight:600;color:oklch(0.45 0.04 55);display:flex;align-items:center;gap:8px;">
+      <span style="font-family:${MONO};font-size:11px;color:oklch(0.55 0.15 38);">▸</span> guía de riego · en qué se basan los umbrales
+    </summary>
+    <div style="padding:4px 16px 16px;display:flex;flex-direction:column;gap:14px;font-size:12.5px;color:oklch(0.4 0.03 55);line-height:1.5;">
+      <div>Un huerto estándar necesita en torno a <strong>25 mm de agua por semana</strong> en condiciones normales. El calor y la evaporación suben esa cifra.</div>
+      <table style="border-collapse:collapse;width:100%;font-size:12px;">
+        <tr><th style="${head}">Temperatura</th><th style="${head}">Agua semanal</th><th style="${head}">Equivalente diario</th><th style="${head}">Riego manual (sin lluvia)</th></tr>
+        <tr><td style="${cell}">Fresco (&lt; 20 °C)</td><td style="${cell}">20–25 mm</td><td style="${cell}">~3 mm/día</td><td style="${cell}">cada 3–4 días</td></tr>
+        <tr><td style="${cell}">Moderado (20–28 °C)</td><td style="${cell}">25–35 mm</td><td style="${cell}">~4–5 mm/día</td><td style="${cell}">cada 2–3 días</td></tr>
+        <tr><td style="${cell}">Caluroso (&gt; 30 °C)</td><td style="${cell}">40–50 mm</td><td style="${cell}">~6–7 mm/día</td><td style="${cell}">a diario</td></tr>
+      </table>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div><strong>Lluvia diaria:</strong> por debajo de 3 mm es llovizna que se evapora antes de calar, ignórala. El umbral de lluvia por defecto está en 3 mm por eso.</div>
+        <div>Entre 3 y 10 mm retrasa el riego un día. De 10 mm en adelante es un riego profundo que cubre entre 2 y 4 días.</div>
+      </div>
+    </div>
+  </details>`;
+}
+
+// ---- error state --------------------------------------------------------
+function errorView() {
+  return `<div style="background:oklch(1 0 0);border:1px solid oklch(0.85 0.09 45);border-radius:14px;padding:28px 32px;display:flex;flex-direction:column;gap:12px;">
+    <div style="font-size:18px;font-weight:700;color:oklch(0.45 0.15 38);">No encuentro history.json</div>
+    <div style="font-size:14px;line-height:1.6;color:oklch(0.4 0.03 55);max-width:620px;">
+      El panel lee <code style="font-family:${MONO};background:oklch(0.95 0.01 82);padding:1px 5px;border-radius:4px;">history.json</code> en esta misma carpeta.
+      Si abres el archivo directamente desde el disco, el navegador bloquea la lectura. Sirve la carpeta y ábrelo por http:
+    </div>
+    <pre style="font-family:${MONO};font-size:13px;background:oklch(0.22 0.02 55);color:oklch(0.92 0.02 82);padding:12px 16px;border-radius:8px;margin:0;overflow:auto;">cd esta-carpeta
+python3 -m http.server 8000
+# abre http://localhost:8000</pre>
+    <div style="font-family:${MONO};font-size:11.5px;color:oklch(0.55 0.04 58);">detalle: ${state.error}</div>
+  </div>`;
+}
+
+// ---- render -------------------------------------------------------------
+function render() {
+  const app = document.getElementById("app");
+
+  const header = `<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <div style="font-family:${MONO};font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:oklch(0.55 0.04 60);">Huerta · registro de riego</div>
+      <h1 style="margin:0;font-size:34px;font-weight:700;letter-spacing:-0.02em;line-height:1.05;">Agosto 2026</h1>
+    </div>
+    <div style="display:flex;gap:6px;padding:4px;border-radius:10px;background:oklch(0.93 0.02 78);border:1px solid oklch(0.87 0.025 75);">
+      <button type="button" data-view="month" style="${tabStyle(state.view === "month")}">Mes</button>
+      <button type="button" data-view="week" style="${tabStyle(state.view === "week")}">Semana</button>
+    </div>
+  </div>`;
+
+  if (state.error) {
+    app.innerHTML = header + errorView();
+    bindTabs();
+    return;
+  }
+
+  const days = buildDays();
+  const hotN = days.filter(d => d.hot).length;
+  const dryN = days.filter(d => d.dry).length;
+  const bothN = days.filter(d => d.both).length;
+  const recorded = days.filter(d => d.has).length;
+  const noData = DAYS_IN_MONTH - recorded;
+
+  const controls = `<div style="display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,1fr) minmax(300px,1.3fr);gap:16px;align-items:stretch;">
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.9 0.02 75);border-radius:12px;padding:16px 18px 14px;display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;">
+        <div style="font-size:13px;font-weight:600;letter-spacing:0.02em;color:oklch(0.45 0.04 55);flex:1;">Temperatura alta igual o superior a</div>
+        <div style="font-family:${MONO};font-size:22px;font-weight:600;color:oklch(0.52 0.17 38);white-space:nowrap;">${n1(state.tempT)}°C</div>
+      </div>
+      <input type="range" id="tempSlider" min="24" max="40" step="0.5" value="${state.tempT}">
+      <div style="display:flex;justify-content:space-between;font-family:${MONO};font-size:11px;color:oklch(0.62 0.03 60);"><span>24°</span><span>40°</span></div>
+      <div style="font-family:${MONO};font-size:11px;letter-spacing:0.04em;color:oklch(0.5 0.05 45);">${hotN} días con calor</div>
+    </div>
+    <div style="background:oklch(1 0 0);border:1px solid oklch(0.9 0.02 75);border-radius:12px;padding:16px 18px 14px;display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;">
+        <div style="font-size:13px;font-weight:600;letter-spacing:0.02em;color:oklch(0.45 0.04 55);flex:1;">Sin lluvia cuando la lluvia es menor a</div>
+        <div style="font-family:${MONO};font-size:22px;font-weight:600;color:oklch(0.5 0.1 235);white-space:nowrap;">${n1(state.rainT)} mm</div>
+      </div>
+      <input type="range" id="rainSlider" min="0" max="12" step="0.5" value="${state.rainT}">
+      <div style="display:flex;justify-content:space-between;font-family:${MONO};font-size:11px;color:oklch(0.62 0.03 60);"><span>0 mm</span><span>12 mm</span></div>
+      <div style="font-family:${MONO};font-size:11px;letter-spacing:0.04em;color:oklch(0.45 0.08 235);">${dryN} días sin lluvia</div>
+    </div>
+    <div style="background:oklch(0.5 0.17 34);border:1px solid oklch(0.44 0.17 34);border-radius:12px;padding:16px 18px;display:flex;align-items:center;gap:18px;color:oklch(0.99 0.01 80);">
+      <div style="font-family:${MONO};font-size:46px;font-weight:600;line-height:1;">${bothN}</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="font-size:15px;font-weight:700;letter-spacing:0.02em;">días calurosos y secos — hay que regar</div>
+        <div style="font-size:12.5px;opacity:0.85;line-height:1.4;">${hotN} con calor · ${dryN} sin lluvia · ${recorded} de 31 días registrados · ${noData} aún vacíos</div>
+      </div>
+    </div>
+  </div>`;
+
+  const body = state.view === "month" ? monthView(days) : weekView(days);
+  const footer = `<div style="font-family:${MONO};font-size:11px;color:oklch(0.68 0.02 70);">fuente: history.json · ${recorded} de 31 días registrados</div>`;
+
+  app.innerHTML = header + controls + legend() + reference() + body + footer;
+
+  bindTabs();
+  const t = document.getElementById("tempSlider");
+  const r = document.getElementById("rainSlider");
+  if (t) t.addEventListener("input", e => { state.tempT = parseFloat(e.target.value); render(); });
+  if (r) r.addEventListener("input", e => { state.rainT = parseFloat(e.target.value); render(); });
+}
+
+function tabStyle(on) {
+  return `font-family:Archivo,sans-serif;font-size:13.5px;font-weight:600;letter-spacing:0.02em;padding:8px 20px;border-radius:7px;cursor:pointer;border:1px solid ${on ? "oklch(0.5 0.17 34)" : "transparent"};background:${on ? "oklch(1 0 0)" : "transparent"};color:${on ? "oklch(0.42 0.15 38)" : "oklch(0.5 0.04 58)"};box-shadow:${on ? "0 1px 2px oklch(0.5 0.1 40 / 0.18)" : "none"};`;
+}
+
+function bindTabs() {
+  document.querySelectorAll("[data-view]").forEach(btn => {
+    btn.addEventListener("click", () => { state.view = btn.getAttribute("data-view"); render(); });
+  });
+}
+
+// slider re-render keeps focus on the thumb so dragging stays smooth
+const _render = render;
+render = function () {
+  const active = document.activeElement;
+  const id = active && active.id;
+  _render();
+  if (id) { const el = document.getElementById(id); if (el) el.focus(); }
+};
+
+// ---- load ---------------------------------------------------------------
+fetch(DATA_URL)
+  .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+  .then(data => { state.data = data; state.error = ""; render(); })
+  .catch(err => { state.error = String(err.message || err); render(); });
+
+render();
+</script>
+</body>
+</html>
