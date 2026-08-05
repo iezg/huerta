@@ -45,7 +45,12 @@
     "watered": false
   },
   "2026-08-04": {
-    "high_c": 30.3,
+    "high_c": 30.7,
+    "rain_mm": 0.0,
+    "watered": false
+  },
+  "2026-08-05": {
+    "high_c": 25.0,
     "rain_mm": 0.0,
     "watered": false
   }
