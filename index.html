@@ -116,6 +116,20 @@ function buildDays() {
   return out;
 }
 
+// ---- cell outline (shared by month + week so the logic can't drift) -----
+// Priority: hot & dry & not watered (urgent) > hot & dry & watered (soft) > rained > neutral.
+const NEUTRAL_BORDER = "oklch(0.9 0.015 78)";
+const OL_ALERT   = "oklch(0.5 0.19 34)";     // hot + dry + not watered: strong terracotta
+const OL_WATERED = "oklch(0.45 0.1 235)";    // hot + dry + watered: blue (you watered it)
+const OL_RAIN    = "oklch(0.66 0.11 235)";   // meaningful rain (>= rain threshold): lighter blue
+function outline(d) {
+  if (d.watered === true) return { color: OL_WATERED, width: "1px" }; // any watered day wins, weather or not
+  if (!d.has) return { color: NEUTRAL_BORDER, width: "1px" };
+  if (d.both) return { color: OL_ALERT, width: "1px" };               // hot + dry + not watered
+  if (d.rain !== null && d.rain >= state.rainT) return { color: OL_RAIN, width: "1px" }; // it rained
+  return { color: NEUTRAL_BORDER, width: "1px" };
+}
+
 // ---- watered marker (three states) -------------------------------------
 function wateredMarkup(d) {
   if (d.watered === true) {
@@ -138,15 +152,10 @@ function monthCell(d) {
   const base = "height:100%;border-radius:10px;padding:11px 12px 10px;box-sizing:border-box;display:grid;grid-template-rows:23px 76px 1fr;";
   // Flat, uncolored chrome by default. Flags are conveyed by the chips.
   const CELL_BG = "oklch(0.985 0.008 82)";
-  const NEUTRAL_BORDER = "oklch(0.9 0.015 78)";
-  const WATER_ALERT = "oklch(0.5 0.19 34)"; // same terracotta as the "hay que regar" chip
-  // A "hay que regar" day (hot + dry) that was not watered gets an outline in the alert colour.
-  const alertUnwatered = d.both && d.watered !== true;
-  const borderColor = alertUnwatered ? WATER_ALERT : NEUTRAL_BORDER;
-  const borderWidth = alertUnwatered ? "2px" : "1px";
+  const ol = outline(d);
   const cellStyle = d.has
-    ? base + `background:${CELL_BG};border:${borderWidth} solid ${borderColor};`
-    : base + `background:repeating-linear-gradient(135deg, oklch(0.955 0.006 80) 0 5px, oklch(0.935 0.006 80) 5px 10px);border:${borderWidth} solid ${borderColor};`;
+    ? base + `background:${CELL_BG};border:${ol.width} solid ${ol.color};`
+    : base + `background:repeating-linear-gradient(135deg, oklch(0.955 0.006 80) 0 5px, oklch(0.935 0.006 80) 5px 10px);border:${ol.width} solid ${ol.color};`;
 
   const chipBase = `font-family:${MONO};font-size:9.5px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;padding:3px 5px;border-radius:4px;text-align:right;line-height:1.25;`;
   const hotChip = `<div style="${chipBase}background:oklch(0.62 0.18 42);color:oklch(0.99 0.01 80);">calor</div>`;
@@ -270,9 +279,13 @@ function weekView(days) {
 
     const feet = slots.map(d => {
       if (!d) return `<div class="wpad" style="visibility:hidden;"></div>`;
-      const footStyle = d.both ? "background:oklch(0.62 0.19 36 / 0.14);border:1px solid oklch(0.5 0.19 34);"
-        : d.has ? "background:oklch(0.975 0.012 82);border:1px solid oklch(0.93 0.018 78);"
-        : "background:oklch(0.965 0.005 80);border:1px dashed oklch(0.9 0.008 80);";
+      const ol = outline(d);
+      const footBg = d.both ? "oklch(0.62 0.19 36 / 0.14)"
+        : d.has ? "oklch(0.975 0.012 82)"
+        : "oklch(0.965 0.005 80)";
+      const footStyle = d.has
+        ? `background:${footBg};border:${ol.width} solid ${ol.color};`
+        : `background:${footBg};border:1px dashed oklch(0.9 0.008 80);`;
       const has = d.has;
       const dowColor = has ? "oklch(0.58 0.04 58)" : "oklch(0.78 0.015 72)";
       const dateColor = has ? "oklch(0.3 0.04 50)" : "oklch(0.78 0.015 72)";
